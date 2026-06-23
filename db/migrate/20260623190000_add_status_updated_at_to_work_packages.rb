@@ -32,8 +32,9 @@ class AddStatusUpdatedAtToWorkPackages < ActiveRecord::Migration[7.1]
   def up
     add_column :work_packages, :status_updated_at, :datetime, precision: nil
 
-    # Initialize from the most recent journal where the status changed,
-    # falling back to updated_at when no such journal exists.
+    # Initialize from the first journal in the most recent consecutive run where
+    # the status matches the current status_id. This correctly handles cases
+    # like A→B→A by finding when the status last changed TO the current value.
     execute <<~SQL
       UPDATE work_packages wp
       SET status_updated_at = COALESCE(
@@ -44,7 +45,18 @@ class AddStatusUpdatedAtToWorkPackages < ActiveRecord::Migration[7.1]
           WHERE j.journable_type = 'WorkPackage'
             AND j.journable_id = wp.id
             AND wpj.status_id = wp.status_id
-          ORDER BY j.updated_on DESC
+            AND j.id > COALESCE(
+              (
+                SELECT MAX(j2.id)
+                FROM journals j2
+                INNER JOIN work_package_journals wpj2 ON wpj2.journal_id = j2.id
+                WHERE j2.journable_type = 'WorkPackage'
+                  AND j2.journable_id = wp.id
+                  AND wpj2.status_id != wp.status_id
+              ),
+              0
+            )
+          ORDER BY j.id ASC
           LIMIT 1
         ),
         wp.updated_at

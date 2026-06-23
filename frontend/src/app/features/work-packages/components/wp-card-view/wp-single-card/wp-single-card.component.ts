@@ -240,11 +240,11 @@ export class WorkPackageSingleCardComponent extends UntilDestroyedMixin implemen
   }
 
   public agingDays(wp:WorkPackageResource):number {
-    const ref = wp.statusUpdatedAt ?? wp.updatedAt;
-    if (!ref) {
+    const lastStatusChangeDate = wp.statusUpdatedAt ?? wp.updatedAt;
+    if (!lastStatusChangeDate) {
       return 0;
     }
-    const diffMs = Date.now() - new Date(ref).getTime();
+    const diffMs = Date.now() - new Date(lastStatusChangeDate).getTime();
     return Math.floor(diffMs / (1000 * 60 * 60 * 24));
   }
 

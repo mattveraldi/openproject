@@ -485,6 +485,40 @@ RSpec.describe WorkPackage do
     end
   end
 
+  describe "#update_status_updated_at" do
+    context "when creating a new work package" do
+      it "sets status_updated_at on create" do
+        freeze_time = Time.current
+        allow(Time).to receive(:current).and_return(freeze_time)
+        wp = create(:work_package, project:)
+        expect(wp.status_updated_at).to be_within(1.second).of(freeze_time)
+      end
+    end
+
+    context "when status changes" do
+      let!(:work_package) { create(:work_package, project:) }
+      let(:new_status) { create(:status) }
+
+      it "updates status_updated_at when status changes" do
+        original_time = work_package.status_updated_at
+        travel_to(1.day.from_now) do
+          work_package.status = new_status
+          work_package.save!
+          expect(work_package.status_updated_at).to be > original_time
+        end
+      end
+
+      it "does not update status_updated_at when other attributes change" do
+        original_time = work_package.status_updated_at
+        travel_to(1.day.from_now) do
+          work_package.subject = "Changed subject"
+          work_package.save!
+          expect(work_package.status_updated_at).to be_within(1.second).of(original_time)
+        end
+      end
+    end
+  end
+
   describe "#group_by" do
     shared_let(:type2) { create(:type) }
     shared_let(:priority2) { create(:priority) }
