@@ -129,6 +129,14 @@
           alt="">
       }
       <div class="op-wp-single-card--content-status-baseline">
+        @if (!showAsInlineCard) {
+          <span
+            class="op-wp-single-card--aging-wip"
+            [ngClass]="agingClass(agingDays(workPackage))"
+            [title]="agingDays(workPackage) + 'd in current status'"
+            data-test-selector="op-wp-single-card--aging-wip"
+          >{{ agingDays(workPackage) }}d</span>
+        }
         @if (showStatusButton) {
           <wp-status-button [workPackage]="workPackage"
             [small]="true"

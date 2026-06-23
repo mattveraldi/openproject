@@ -109,8 +109,10 @@
     &-status-baseline
       grid-area: status
       margin-right: 5px
-      max-width: 6.5rem
+      max-width: 9rem
       display: flex
+      align-items: center
+      gap: 3px
     &-status
       overflow: hidden
     &-baseline
@@ -139,6 +141,30 @@
       color: var(--fgColor-muted)
       margin: 0 8px
       white-space: nowrap
+
+  &--aging-wip
+    display: inline-flex
+    align-items: center
+    justify-content: center
+    padding: 1px 5px
+    border-radius: 3px
+    font-size: 11px
+    font-weight: 600
+    line-height: 16px
+    margin-right: 4px
+    white-space: nowrap
+
+    &_green
+      background-color: #d4edda
+      color: #155724
+
+    &_yellow
+      background-color: #fff3cd
+      color: #856404
+
+    &_red
+      background-color: #f8d7da
+      color: #721c24
 
   &--highlighting
     width: 100%

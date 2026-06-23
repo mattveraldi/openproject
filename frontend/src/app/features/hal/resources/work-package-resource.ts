@@ -164,6 +164,8 @@ export class WorkPackageBaseResource extends HalResource {
 
   public updatedAt:Date;
 
+  public statusUpdatedAt:Date;
+
   public lockVersion:number;
 
   public description:any;

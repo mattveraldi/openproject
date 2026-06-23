@@ -151,7 +151,7 @@ class WorkPackage < ApplicationRecord
 
   after_validation :set_attachments_error_details,
                    if: lambda { |work_package| work_package.errors.messages.has_key? :attachments }
-  before_save :close_duplicates, :update_done_ratio_from_status
+  before_save :close_duplicates, :update_done_ratio_from_status, :update_status_updated_at
   before_create :default_assign
   # By using prepend: true, the callback will be performed before the meeting_agenda_items are nullified,
   # thus the associated agenda items will be available at the time the callback method is performed.
@@ -401,6 +401,12 @@ class WorkPackage < ApplicationRecord
   def update_done_ratio_from_status
     if WorkPackage.status_based_mode? && status&.default_done_ratio
       self.done_ratio = status.default_done_ratio
+    end
+  end
+
+  def update_status_updated_at
+    if status_id_changed? || new_record?
+      self.status_updated_at = Time.current
     end
   end
 

@@ -476,6 +476,8 @@ module API
 
         date_time_property :updated_at
 
+        date_time_property :status_updated_at
+
         property :relations,
                  embedded: true,
                  exec_context: :decorator,

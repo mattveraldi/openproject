@@ -239,6 +239,24 @@ export class WorkPackageSingleCardComponent extends UntilDestroyedMixin implemen
     return this.attributeHighlighting('type', wp);
   }
 
+  public agingDays(wp:WorkPackageResource):number {
+    const ref = wp.statusUpdatedAt ?? wp.updatedAt;
+    if (!ref) {
+      return 0;
+    }
+    const diffMs = Date.now() - new Date(ref).getTime();
+    return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  }
+
+  public agingClass(days:number):string {
+    if (days <= 2) {
+      return 'op-wp-single-card--aging-wip_green';
+    } else if (days <= 4) {
+      return 'op-wp-single-card--aging-wip_yellow';
+    }
+    return 'op-wp-single-card--aging-wip_red';
+  }
+
   public onRemoved(wp:WorkPackageResource):void {
     this.onRemove.emit(wp);
   }
