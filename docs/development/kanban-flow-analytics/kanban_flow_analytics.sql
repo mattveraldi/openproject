@@ -8,6 +8,9 @@
 --   work_packages
 --     id, subject, status_id, project_id, created_at, updated_at
 --
+--   projects
+--     id, name, identifier
+--
 --   statuses
 --     id, name, is_closed, is_default, is_readonly, excluded_from_totals, position
 --
@@ -25,35 +28,49 @@
 --   lower(validity_period) = timestamp when the work package entered that state.
 --
 -- =============================================================================
+-- COMMON FILTER VARIABLES (set inside every query in CTE `params`):
+--
+--   project_name  -> project to analyze by exact name
+--   since_date    -> include only work_packages.created_at >= since_date
+--
+-- Set NULL to disable a filter.
+-- =============================================================================
 
 
 -- =============================================================================
 -- CONFIGURATION: excluded states (adapt names to your workflow)
 -- =============================================================================
--- States listed here are excluded from WIP flow metrics (queries 2-6).
+-- States listed here are excluded from WIP flow metrics (queries 3,4,5,6,9).
 -- Typical exclusions: 'New', 'Closed', 'Rejected', 'On Hold'
 -- Adjust the list to match your actual status names.
-
--- Used as an inline filter: s.name NOT IN (<excluded_states>)
--- See each query below for usage.
 
 
 -- =============================================================================
 -- QUERY 1: TIME IN STATE (AGING WIP)
 -- =============================================================================
--- For each work package, shows the current status and how long it has been
--- in that status (entered_at = lower bound of the currently active journal).
--- =============================================================================
 
+WITH params AS (
+    SELECT
+        'My Project'::text       AS project_name,  -- set NULL to include all projects
+        '2026-01-01'::timestamptz AS since_date    -- set NULL to include all dates
+),
+scoped_work_packages AS (
+    SELECT wp.*
+    FROM work_packages wp
+    JOIN projects p ON p.id = wp.project_id
+    CROSS JOIN params prm
+    WHERE (prm.project_name IS NULL OR p.name = prm.project_name)
+      AND (prm.since_date IS NULL OR wp.created_at >= prm.since_date)
+)
 SELECT
     wp.id                                              AS work_package_id,
     wp.subject,
     s.name                                             AS current_status,
     lower(j.validity_period)                           AS entered_at,
     NOW() - lower(j.validity_period)                   AS time_in_state,
-    EXTRACT(EPOCH FROM (NOW() - lower(j.validity_period))) / 3600 AS hours_in_state,
+    EXTRACT(EPOCH FROM (NOW() - lower(j.validity_period))) / 3600  AS hours_in_state,
     EXTRACT(EPOCH FROM (NOW() - lower(j.validity_period))) / 86400 AS days_in_state
-FROM work_packages wp
+FROM scoped_work_packages wp
 JOIN statuses s
     ON s.id = wp.status_id
 JOIN journals j
@@ -70,15 +87,25 @@ ORDER BY days_in_state DESC;
 -- =============================================================================
 -- QUERY 2: WIP DISTRIBUTION PER STATE
 -- =============================================================================
--- Count of work packages currently in each status (all states).
--- Provides a snapshot of where work accumulates.
--- =============================================================================
 
+WITH params AS (
+    SELECT
+        'My Project'::text       AS project_name,
+        '2026-01-01'::timestamptz AS since_date
+),
+scoped_work_packages AS (
+    SELECT wp.*
+    FROM work_packages wp
+    JOIN projects p ON p.id = wp.project_id
+    CROSS JOIN params prm
+    WHERE (prm.project_name IS NULL OR p.name = prm.project_name)
+      AND (prm.since_date IS NULL OR wp.created_at >= prm.since_date)
+)
 SELECT
     s.name   AS status,
     s.position,
     COUNT(*) AS wip_count
-FROM work_packages wp
+FROM scoped_work_packages wp
 JOIN statuses s ON s.id = wp.status_id
 GROUP BY s.id, s.name, s.position
 ORDER BY s.position;
@@ -87,21 +114,28 @@ ORDER BY s.position;
 -- =============================================================================
 -- QUERY 3: AVERAGE AGE PER STATE (BOTTLENECK DETECTION)
 -- =============================================================================
--- Average time (in days) work packages have spent in their current state,
--- grouped by status. States excluded from flow analysis are filtered out.
--- High average age signals a bottleneck.
--- =============================================================================
 
+WITH params AS (
+    SELECT
+        'My Project'::text       AS project_name,
+        '2026-01-01'::timestamptz AS since_date
+),
+scoped_work_packages AS (
+    SELECT wp.*
+    FROM work_packages wp
+    JOIN projects p ON p.id = wp.project_id
+    CROSS JOIN params prm
+    WHERE (prm.project_name IS NULL OR p.name = prm.project_name)
+      AND (prm.since_date IS NULL OR wp.created_at >= prm.since_date)
+)
 SELECT
     s.name                                                          AS status,
     s.position,
     COUNT(*)                                                        AS wip_count,
     ROUND(
-        AVG(
-            EXTRACT(EPOCH FROM (NOW() - lower(j.validity_period))) / 86400
-        )::numeric,
+        AVG(EXTRACT(EPOCH FROM (NOW() - lower(j.validity_period))) / 86400)::numeric,
     2)                                                              AS avg_age_days
-FROM work_packages wp
+FROM scoped_work_packages wp
 JOIN statuses s
     ON s.id = wp.status_id
    AND s.name NOT IN ('New', 'Closed', 'Rejected')   -- << adapt to your workflow
@@ -120,11 +154,21 @@ ORDER BY avg_age_days DESC;
 -- =============================================================================
 -- QUERY 4: MAX AGE PER STATE (STUCK WORK DETECTION)
 -- =============================================================================
--- Maximum time (in days) any single work package has been stuck in a state.
--- Also returns the specific work package id and subject for investigation.
--- =============================================================================
 
-WITH aging AS (
+WITH params AS (
+    SELECT
+        'My Project'::text       AS project_name,
+        '2026-01-01'::timestamptz AS since_date
+),
+scoped_work_packages AS (
+    SELECT wp.*
+    FROM work_packages wp
+    JOIN projects p ON p.id = wp.project_id
+    CROSS JOIN params prm
+    WHERE (prm.project_name IS NULL OR p.name = prm.project_name)
+      AND (prm.since_date IS NULL OR wp.created_at >= prm.since_date)
+),
+aging AS (
     SELECT
         wp.id                                                           AS work_package_id,
         wp.subject,
@@ -132,7 +176,7 @@ WITH aging AS (
         s.name                                                          AS status,
         s.position,
         EXTRACT(EPOCH FROM (NOW() - lower(j.validity_period))) / 86400 AS age_days
-    FROM work_packages wp
+    FROM scoped_work_packages wp
     JOIN statuses s
         ON s.id = wp.status_id
        AND s.name NOT IN ('New', 'Closed', 'Rejected')   -- << adapt to your workflow
@@ -148,9 +192,9 @@ WITH aging AS (
 SELECT DISTINCT ON (status_id)
     status,
     position,
-    work_package_id     AS oldest_wp_id,
-    subject             AS oldest_wp_subject,
-    ROUND(age_days::numeric, 2) AS max_age_days
+    work_package_id                  AS oldest_wp_id,
+    subject                          AS oldest_wp_subject,
+    ROUND(age_days::numeric, 2)      AS max_age_days
 FROM aging
 ORDER BY status_id, age_days DESC;
 
@@ -158,10 +202,20 @@ ORDER BY status_id, age_days DESC;
 -- =============================================================================
 -- QUERY 5: FLOW THROUGH STATES (GENERAL DISTRIBUTION)
 -- =============================================================================
--- Full picture of all states including total and active-flow counts side by side.
--- Useful for understanding proportion of WIP in flow vs. boundary states.
--- =============================================================================
 
+WITH params AS (
+    SELECT
+        'My Project'::text       AS project_name,
+        '2026-01-01'::timestamptz AS since_date
+),
+scoped_work_packages AS (
+    SELECT wp.*
+    FROM work_packages wp
+    JOIN projects p ON p.id = wp.project_id
+    CROSS JOIN params prm
+    WHERE (prm.project_name IS NULL OR p.name = prm.project_name)
+      AND (prm.since_date IS NULL OR wp.created_at >= prm.since_date)
+)
 SELECT
     s.name                                        AS status,
     s.position,
@@ -172,7 +226,7 @@ SELECT
         WHERE s.name NOT IN ('New', 'Closed', 'Rejected')  -- << adapt to your workflow
     )                                             AS flow_wip
 FROM statuses s
-LEFT JOIN work_packages wp ON wp.status_id = s.id
+LEFT JOIN scoped_work_packages wp ON wp.status_id = s.id
 GROUP BY s.id, s.name, s.position, s.is_closed, s.is_default
 ORDER BY s.position;
 
@@ -180,10 +234,20 @@ ORDER BY s.position;
 -- =============================================================================
 -- QUERY 6: WIP EXCLUDING BOUNDARY STATES (FOCUS FLOW STATES)
 -- =============================================================================
--- Like Query 1 but restricted to active flow states only.
--- Shows aging only for the work packages that are "in flight".
--- =============================================================================
 
+WITH params AS (
+    SELECT
+        'My Project'::text       AS project_name,
+        '2026-01-01'::timestamptz AS since_date
+),
+scoped_work_packages AS (
+    SELECT wp.*
+    FROM work_packages wp
+    JOIN projects p ON p.id = wp.project_id
+    CROSS JOIN params prm
+    WHERE (prm.project_name IS NULL OR p.name = prm.project_name)
+      AND (prm.since_date IS NULL OR wp.created_at >= prm.since_date)
+)
 SELECT
     wp.id                                              AS work_package_id,
     wp.subject,
@@ -193,7 +257,7 @@ SELECT
     ROUND(
         (EXTRACT(EPOCH FROM (NOW() - lower(j.validity_period))) / 86400)::numeric,
     2)                                                 AS days_in_state
-FROM work_packages wp
+FROM scoped_work_packages wp
 JOIN statuses s
     ON s.id = wp.status_id
    AND s.name NOT IN ('New', 'Closed', 'Rejected')   -- << adapt to your workflow
@@ -211,12 +275,20 @@ ORDER BY days_in_state DESC;
 -- =============================================================================
 -- QUERY 7: LEAD TIME (CREATION → CLOSURE)
 -- =============================================================================
--- Applicable only to work packages in a closed status (is_closed = true).
--- lead_time = timestamp when closed - created_at
--- "closed_at" is derived from lower(validity_period) of the current journal,
--- which is the moment the work package entered the closed status.
--- =============================================================================
 
+WITH params AS (
+    SELECT
+        'My Project'::text       AS project_name,
+        '2026-01-01'::timestamptz AS since_date
+),
+scoped_work_packages AS (
+    SELECT wp.*
+    FROM work_packages wp
+    JOIN projects p ON p.id = wp.project_id
+    CROSS JOIN params prm
+    WHERE (prm.project_name IS NULL OR p.name = prm.project_name)
+      AND (prm.since_date IS NULL OR wp.created_at >= prm.since_date)
+)
 SELECT
     wp.id                                              AS work_package_id,
     wp.subject,
@@ -225,7 +297,7 @@ SELECT
     ROUND(
         (EXTRACT(EPOCH FROM (lower(j.validity_period) - wp.created_at)) / 86400)::numeric,
     2)                                                 AS lead_time_days
-FROM work_packages wp
+FROM scoped_work_packages wp
 JOIN statuses s
     ON s.id = wp.status_id
    AND s.is_closed = true
@@ -243,11 +315,21 @@ ORDER BY lead_time_days DESC;
 -- =============================================================================
 -- QUERY 8: COMBINED SUMMARY (AGGREGATE VIEW PER STATE)
 -- =============================================================================
--- Single output combining WIP count, average age, and max age per state.
--- Also identifies the "most blocked" work package per state.
--- =============================================================================
 
-WITH aging AS (
+WITH params AS (
+    SELECT
+        'My Project'::text       AS project_name,
+        '2026-01-01'::timestamptz AS since_date
+),
+scoped_work_packages AS (
+    SELECT wp.*
+    FROM work_packages wp
+    JOIN projects p ON p.id = wp.project_id
+    CROSS JOIN params prm
+    WHERE (prm.project_name IS NULL OR p.name = prm.project_name)
+      AND (prm.since_date IS NULL OR wp.created_at >= prm.since_date)
+),
+aging AS (
     SELECT
         wp.id                                                           AS work_package_id,
         wp.subject,
@@ -256,7 +338,7 @@ WITH aging AS (
         s.position,
         s.is_closed,
         EXTRACT(EPOCH FROM (NOW() - lower(j.validity_period))) / 86400 AS age_days
-    FROM work_packages wp
+    FROM scoped_work_packages wp
     JOIN statuses s
         ON s.id = wp.status_id
     JOIN journals j
@@ -283,9 +365,9 @@ summary AS (
 oldest_per_state AS (
     SELECT DISTINCT ON (status_id)
         status_id,
-        work_package_id AS oldest_wp_id,
-        subject         AS oldest_wp_subject,
-        ROUND(age_days::numeric, 2) AS oldest_wp_age_days
+        work_package_id                             AS oldest_wp_id,
+        subject                                     AS oldest_wp_subject,
+        ROUND(age_days::numeric, 2)                AS oldest_wp_age_days
     FROM aging
     ORDER BY status_id, age_days DESC
 )
@@ -307,18 +389,27 @@ ORDER BY sm.position;
 -- =============================================================================
 -- QUERY 9: CRITICAL STATES (RANKED BY AVERAGE + MAX AGE)
 -- =============================================================================
--- Identifies the states that are most likely bottlenecks or have stagnant items.
--- Excludes boundary states (New, Closed, Rejected).
--- Ranks states by average age descending.
--- =============================================================================
 
-WITH aging AS (
+WITH params AS (
+    SELECT
+        'My Project'::text       AS project_name,
+        '2026-01-01'::timestamptz AS since_date
+),
+scoped_work_packages AS (
+    SELECT wp.*
+    FROM work_packages wp
+    JOIN projects p ON p.id = wp.project_id
+    CROSS JOIN params prm
+    WHERE (prm.project_name IS NULL OR p.name = prm.project_name)
+      AND (prm.since_date IS NULL OR wp.created_at >= prm.since_date)
+),
+aging AS (
     SELECT
         s.id                                                            AS status_id,
         s.name                                                          AS status,
         s.position,
         EXTRACT(EPOCH FROM (NOW() - lower(j.validity_period))) / 86400 AS age_days
-    FROM work_packages wp
+    FROM scoped_work_packages wp
     JOIN statuses s
         ON s.id = wp.status_id
        AND s.name NOT IN ('New', 'Closed', 'Rejected')   -- << adapt to your workflow
@@ -334,9 +425,9 @@ WITH aging AS (
 SELECT
     status,
     position,
-    COUNT(*)                          AS wip_count,
-    ROUND(AVG(age_days)::numeric, 2)  AS avg_age_days,
-    ROUND(MAX(age_days)::numeric, 2)  AS max_age_days,
+    COUNT(*)                              AS wip_count,
+    ROUND(AVG(age_days)::numeric, 2)      AS avg_age_days,
+    ROUND(MAX(age_days)::numeric, 2)      AS max_age_days,
     RANK() OVER (ORDER BY AVG(age_days) DESC) AS bottleneck_rank
 FROM aging
 GROUP BY status_id, status, position

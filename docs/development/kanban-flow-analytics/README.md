@@ -36,6 +36,23 @@ Each journal entry has a `validity_period` (a PostgreSQL `tstzrange`).
 
 ## Configuration
 
+Every query now includes two variables in `WITH params AS (...)`:
+
+- `project_name` → exact project name to analyze
+- `since_date` → include only work packages with `created_at >= since_date`
+
+Set either variable to `NULL` to disable that filter.
+
+Example:
+
+```sql
+WITH params AS (
+  SELECT
+    'My Project'::text AS project_name,
+    '2026-01-01'::timestamptz AS since_date
+)
+```
+
 All queries that compute flow metrics filter out **boundary states** — states that are
 not part of the active flow (e.g. New, Closed, Rejected).
 
